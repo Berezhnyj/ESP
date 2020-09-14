@@ -311,7 +311,6 @@ float set_timer_stop() {
   }
 }
 
-
 void handle_OnConnect() {
   float bme_humidity    = bme.readHumidity();
   float bme_temperature = bme.readTemperature();
