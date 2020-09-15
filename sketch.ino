@@ -29,6 +29,8 @@
 	#define MODBUS232 true  // Define flag to enable ModeBus
 	#define address   1     // Define one address for reading
 	#define bitQty    1     // Define the number of bits to read
+	#define SLAVE_ID  1
+	#define Master_ID  1
 #endif
 #define DEVICE_DELAY  100000  // Setup delay
 #define DHTPIN  2       // DHT22 connect to pin 0
@@ -62,16 +64,14 @@ HTTPClient http;
 /* ESP8266WebServer initialization */
 ESP8266WebServer server(80);
 /* Instantiate ModbusMaster object as slave ID 1 */
-ModbusMaster232 ModbusNode(1);
+ModbusMaster232 ModbusNode(Master_ID);
+// Modbus object declaration
+ModbusTCP ModbusSlave(SLAVE_ID);
 /* DynamicJsonDocument initialization */
 DynamicJsonDocument jsonBufferGet(2048);
+// slave id = 1, rs485 control-pin = 8, baud = 9600
 
-/* functions modbus */
-// node.readHoldingRegisters(,)
-// node.writeSingleRegister(,)
-// node.readInputRegisters(,);
-// node.writeSingleCoil(,)
-// node.readWriteMultipleRegisters(,,,)
+
 
 void set_timer_start();
 void print_cli_start_message();
@@ -87,6 +87,28 @@ void setup() {
 		pinMode(7, OUTPUT);
 		ModbusNode.begin(115200);  // Initialize Modbus communication baud rate
 		Serial.println("Modbus RTU Master Online");
+		
+		ModbusSlave.cbVector[CB_WRITE_COIL] = writeDigitlOut;
+		ModbusSlave.cbVector[CB_READ_DISCRETE_INPUT] = readDigitalIn; //    
+		ModbusSlave.cbVector[CB_READ_COILS] = readDigitalIn;
+		ModbusSlave.cbVector[CB_READ_REGISTERS] = readAnalogIn;
+		ModbusSlave.cbVector[CB_WRITE_MULTIPLE_REGISTERS] = writeAnalogOut; // cmheong
+		
+		/* start slave and listen to TCP port 502
+		 */
+		ModbusSlave.begin();
+		/* functions modbus */
+		// node.readHoldingRegisters(,)
+		// node.writeSingleRegister(,)
+		// node.readInputRegisters(,);
+		// node.writeSingleCoil(,)
+		// node.readWriteMultipleRegisters(,,,)
+
+		// log to serial port
+		Serial.println("");
+		Serial.print("Modbus ready, listen on ");
+		Serial.print(WiFi.localIP());
+		Serial.println(" : 502");
 	}
 
 	while (!Serial) continue; // wait for serial port to connect. Needed for native USB
