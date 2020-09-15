@@ -11,3 +11,6 @@ ESP8266 Arduino core comes with libraries to communicate over WiFi using TCP and
 
 **IoT gateway include next protocols:**
 - Modbus RTU protocol;
+
+## Building with make
+makeEspArduino is a generic makefile for any ESP8266 Arduino project. Using make instead of the Arduino IDE makes it easier to do automated and production builds.
