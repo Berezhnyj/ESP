@@ -24,9 +24,8 @@
   #define STASSID "***"
   #define STAPSK  "***"
 #endif
-#ifndef OTAUPDATE
-  #define OTAUPDATE true
-#endif
+#define COAPSERVER	true
+#define OTAUPDATE	true
 #ifndef MODBUS232
   #define MODBUS232 true  // Define flag to enable ModeBus
   #define address   1     // Define one address for reading
@@ -44,6 +43,8 @@
 IPAddress   ESP_ip_addr;
 IPAddress   ESP_subnet_addr;
 IPAddress   ESP_gateway_addr;
+IPAddress 	coap_dev_ip(XXX,XXX,XXX,XXX);
+byte coap_mac[] = { 0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
 /* Object initialization */
 const char* ssid         = STASSID;
 const char* password     = STAPSK;
@@ -57,10 +58,7 @@ unsigned int server_port = 80;
 uint32_t    lastSentTime = 0UL;
 uint32_t    timer_start;
 uint32_t    timer_stop;
-String DEVICE_SECRET_KEY  = "your-device_secret_key";
-//ip address and default port of coap server in which your interested in
-byte coap_mac[] = { 0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
-IPAddress coap_dev_ip(XXX,XXX,XXX,XXX);
+String 		DEVICE_SECRET_KEY  = "your-device_secret_key";
 
 // LED STATE
 bool LEDSTATE;
@@ -69,38 +67,34 @@ WiFiClient            client;                 /* WiFiClient initialization */
 HTTPClient            http;                   /* HTTPClient initialization */
 ESP8266WebServer      server(80);             /* ESP8266WebServer initialization */
 ModbusMaster232       ModbusNode(Master_ID);  /* Instantiate ModbusMaster object as slave ID 1 */
-//ModbusTCPSlave        ModbusSlave(510);       /* Modbus object declaration */
 DynamicJsonDocument   jsonBufferGet(2048);    /* DynamicJsonDocument initialization */
 Adafruit_BME280       bme;                    /* BME280 initialization */
 WiFiUDP udp;
 Coap                  coap(udp);                   /* Instance for coapclient */
 /* slave id = 1, rs485 control-pin = 8, baud = 9600*/
 
+float set_timer_stop();
 void set_timer_start();
 void print_cli_start_message();
 void set_http_header();
-float set_timer_stop();
-// CoAP client response callback
-void callback_response(CoapPacket &packet, IPAddress ip, int port);
-// CoAP server endpoint url callback
-void callback_light(CoapPacket &packet, IPAddress ip, int port);
+void callback_response(CoapPacket &packet, IPAddress ip, int port);		// CoAP client response callback
+void callback_light(CoapPacket &packet, IPAddress ip, int port);		// CoAP server endpoint url callback
 /*---------------------------------------------------------------------------------*/
 /*--------------------------------------SETUP--------------------------------------*/
 /*---------------------------------------------------------------------------------*/
 void setup() {
   Serial.begin(115200UL);     // Initialize Serial port at 115200 bps
 
-  
-    Serial.println("Setup Callback Light");
-  coap.server(callback_light, "light");
-
-  // client response callback.
-  // this endpoint is single callback.
-  Serial.println("Setup Response Callback");
-  coap.response(callback_response);
-
-    // start coap server/client
-  coap.start();
+  if (COAPSERVER == true) {
+	Serial.println("Setup Callback Light");
+	coap.server(callback_light, "light");
+	// client response callback.
+	// this endpoint is single callback.
+	Serial.println("Setup Response Callback");
+	coap.response(callback_response);
+	// start coap server/client
+	coap.start();
+  }
   
   if (MODBUS232 == true) {
     pinMode(7, OUTPUT);
@@ -147,8 +141,8 @@ void setup() {
   ArduinoOTA.onEnd([]() { Serial.println("[ END ] ESP8266 OTA"); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); });
   ArduinoOTA.onError([](ota_error_t error) {
-  Serial.printf("[ERROR] OTA : [%u] : ", error);  
-  if (error == OTA_AUTH_ERROR)          Serial.println("Auth Failed");
+	Serial.printf("[ERROR] OTA : [%u] : ", error);  
+	if (error == OTA_AUTH_ERROR)          Serial.println("Auth Failed");
     else if (error == OTA_BEGIN_ERROR)    Serial.println("Begin Failed");
     else if (error == OTA_CONNECT_ERROR)  Serial.println("Connect Failed");
     else if (error == OTA_RECEIVE_ERROR)  Serial.println("Receive Failed");
