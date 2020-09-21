@@ -67,7 +67,8 @@ WiFiOTAClass::WiFiOTAClass() :
   _storage(NULL),
   localIp(0),
   _lastMdnsResponseTime(0),
-  beforeApplyCallback(nullptr)
+  beforeApplyCallback(nullptr),
+  onErrorCallback(nullptr)
 {
 }
 
@@ -280,7 +281,7 @@ void WiFiOTAClass::pollServer(Client& client)
       return;
     }
 
-    if (contentLength > _storage->maxSize()) {
+    if (_storage->maxSize() && contentLength > _storage->maxSize()) {
       _storage->close();
       flushRequestBody(client, contentLength);
       sendHttpResponse(client, 413, "Payload Too Large");
@@ -338,9 +339,17 @@ void WiFiOTAClass::sendHttpResponse(Client& client, int code, const char* status
   client.print(" ");
   client.println(status);
   client.println("Connection: close");
+  client.println("Content-type: text/plain");
+  client.print("Content-length: ");
+  client.println(strlen(status));
   client.println();
+  client.print(status);
   delay(500);
   client.stop();
+
+  if (code != 200 && onErrorCallback != nullptr) {
+    onErrorCallback(code, status);
+  }
 }
 
 void WiFiOTAClass::flushRequestBody(Client& client, long contentLength)

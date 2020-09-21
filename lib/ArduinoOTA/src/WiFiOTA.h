@@ -21,35 +21,49 @@
  by Juraj Andrassy
 */
 
-#ifndef _INTERNAL_STORAGE_H_INCLUDED
-#define _INTERNAL_STORAGE_H_INCLUDED
+#ifndef _WIFI_OTA_H_INCLUDED
+#define _WIFI_OTA_H_INCLUDED
+
+#include <Arduino.h>
+#include <Server.h>
+#include <Client.h>
+#include <IPAddress.h>
+#include <Udp.h>
 
 #include "OTAStorage.h"
 
-class InternalStorageClass : public OTAStorage {
+class WiFiOTAClass {
+protected:
+  WiFiOTAClass();
+
+  void begin(IPAddress& localIP, const char* name, const char* password, OTAStorage& storage);
+
+  void pollMdns(UDP &mdnsSocket);
+  void pollServer(Client& client);
+
 public:
+  void beforeApply(void (*fn)(void)) {
+    beforeApplyCallback = fn;
+  }
 
-  InternalStorageClass();
-
-  virtual int open(int length);
-  virtual size_t write(uint8_t);
-  virtual void close();
-  virtual void clear();
-  virtual void apply();
-  virtual long maxSize();
+  void onError(void (*fn)(int code, const char* msg)) {
+    onErrorCallback = fn;
+  }
 
 private:
-  const uint32_t MAX_PARTIONED_SKETCH_SIZE, STORAGE_START_ADDRESS;
+  void sendHttpResponse(Client& client, int code, const char* status);
+  void flushRequestBody(Client& client, long contentLength);
 
-  union {
-    uint32_t u32;
-    uint8_t u8[4];
-  } _addressData;
-
-  int _writeIndex;
-  uint32_t* _writeAddress;
+private:
+  String _name;
+  String _expectedAuthorization;
+  OTAStorage* _storage;
+  
+  uint32_t localIp;
+  uint32_t _lastMdnsResponseTime;
+  
+  void (*beforeApplyCallback)(void);
+  void (*onErrorCallback)(int code, const char*);
 };
-
-extern InternalStorageClass InternalStorage;
 
 #endif

@@ -12,20 +12,15 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
-#include <Adafruit_Sensor.h>
+#include "Adafruit_Sensor.h"
 #include <ModbusMaster232.h>
-#include <ModbusTCPSlave.h>
 #include "Adafruit_BME280.h"
 #include <coap-simple.h>
+#include "handlers.h"
 /*----------------------------Підключення до Wifi мережі---------------------------*/
 /* Global variables and defines */
-#define CLI_DEBUG_LOGS true
-#ifndef STASSID
-  #define STASSID "***"
-  #define STAPSK  "***"
-#endif
 #define COAPSERVER	true
-#define OTAUPDATE	true
+#define OTAUPDATE	  true
 #ifndef MODBUS232
   #define MODBUS232 true  // Define flag to enable ModeBus
   #define address   1     // Define one address for reading
@@ -33,6 +28,10 @@
   #define SLAVE_ID  1
   #define Master_ID 1
 #endif
+#define CLI_DEBUG_LOGS true
+#define STASSID "*******"
+#define STAPSK  "*******"
+#define DEVICE_SECRET_KEY  = "your-device_secret_key";
 #define DEVICE_DELAY  100000  // Setup delay
 #define DHTPIN  2       // DHT22 connect to pin 0
 #define LED     D0      // Led in NodeMCU at pin GPIO16 (D0).
@@ -43,7 +42,7 @@
 IPAddress   ESP_ip_addr;
 IPAddress   ESP_subnet_addr;
 IPAddress   ESP_gateway_addr;
-IPAddress 	coap_dev_ip(XXX,XXX,XXX,XXX);
+IPAddress 	coap_dev_ip(10,10,10,10);
 byte coap_mac[] = { 0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
 /* Object initialization */
 const char* ssid         = STASSID;
@@ -51,27 +50,25 @@ const char* password     = STAPSK;
 const char* server_name  = "smartarms.in.ua";
 const char* deviceid     = "2";
 const char* json_light   = "NULL";
-const char* path         = "/light.json";
-uint32_t response = 0;
 const char* type_of_OTA;
 unsigned int server_port = 80;
+uint32_t    response     = 0;
 uint32_t    lastSentTime = 0UL;
 uint32_t    timer_start;
 uint32_t    timer_stop;
-String 		DEVICE_SECRET_KEY  = "your-device_secret_key";
+String      path               = "/light.json";
 
 // LED STATE
 bool LEDSTATE;
 
 WiFiClient            client;                 /* WiFiClient initialization */
 HTTPClient            http;                   /* HTTPClient initialization */
-ESP8266WebServer      server(80);             /* ESP8266WebServer initialization */
+ESP8266WebServer      server(server_port);             /* ESP8266WebServer initialization */
 ModbusMaster232       ModbusNode(Master_ID);  /* Instantiate ModbusMaster object as slave ID 1 */
 DynamicJsonDocument   jsonBufferGet(2048);    /* DynamicJsonDocument initialization */
 Adafruit_BME280       bme;                    /* BME280 initialization */
-WiFiUDP udp;
-Coap                  coap(udp);                   /* Instance for coapclient */
-/* slave id = 1, rs485 control-pin = 8, baud = 9600*/
+WiFiUDP               udp;                    /* WiFiUDP */
+Coap                  coap(udp);              /* Instance for coapclient */
 
 float set_timer_stop();
 void set_timer_start();
@@ -79,21 +76,23 @@ void print_cli_start_message();
 void set_http_header();
 void callback_response(CoapPacket &packet, IPAddress ip, int port);		// CoAP client response callback
 void callback_light(CoapPacket &packet, IPAddress ip, int port);		// CoAP server endpoint url callback
+
+
 /*---------------------------------------------------------------------------------*/
-/*--------------------------------------SETUP--------------------------------------*/
+/*--------------------------------Power on setup-----------------------------------*/
 /*---------------------------------------------------------------------------------*/
 void setup() {
   Serial.begin(115200UL);     // Initialize Serial port at 115200 bps
 
   if (COAPSERVER == true) {
-	Serial.println("Setup Callback Light");
-	coap.server(callback_light, "light");
-	// client response callback.
-	// this endpoint is single callback.
-	Serial.println("Setup Response Callback");
-	coap.response(callback_response);
-	// start coap server/client
-	coap.start();
+    Serial.println("Setup Callback Light");
+    coap.server(callback_light, "light");
+    // client response callback.
+    // this endpoint is single callback.
+    Serial.println("Setup Response Callback");
+    coap.response(callback_response);
+    // start coap server/client
+    coap.start();
   }
   
   if (MODBUS232 == true) {
@@ -128,7 +127,9 @@ void setup() {
     delay(SEC);
     Serial.print("*");
   }
+
   /* Check OTA update system */
+  /*ArduinoOTA.setPort(8266);
   ArduinoOTA.setPort(8266);
   ArduinoOTA.setHostname("NODE ESP8266");
   
@@ -150,6 +151,9 @@ void setup() {
   });
   
   ArduinoOTA.begin();
+
+*/
+  
   /* print your gateway localIP */
   ESP_ip_addr = WiFi.localIP();
   ESP_gateway_addr = WiFi.gatewayIP();
@@ -185,8 +189,7 @@ void loop() {
   if (OTAUPDATE == true) ArduinoOTA.handle();
 
   if (COAPSERVER == true) {
-      Serial.println("Send Request");
-    int msgid = coap.get(IPAddress(XXX, XXX, XXX, XXX), 5683, "time");
+    coap.get(IPAddress(10, 10, 10, 10), 5683, "time");
     delay(1000);
     coap.loop();
   } else {
@@ -219,7 +222,7 @@ void loop() {
   float bme_altitude    = bme.readAltitude(SEALEVELPRESSURE_HPA);
   float light_analog    = analogRead(A0);
   float wifi_get_rssi   = WiFi.RSSI();
-  char* rellay          = "OFF";
+  String rellay         = "OFF";
   /* HTTPClient Send request GET */
   set_timer_start();
   http.useHTTP10(true);
@@ -283,15 +286,7 @@ void loop() {
 /*------------------------------------------------------------*/
 /*----------------------------FUNC----------------------------*/
 /*------------------------------------------------------------*/
-void print_cli_start_message() {
-  if(CLI_DEBUG_LOGS) {
-    Serial.println("//--------------------------------------------------------------//");
-    Serial.println("//--------------------------------------------------------------//");
-    Serial.println("//--------------------- SMART ARMS SYSTEM ----------------------//");
-    Serial.println("//--------------------------------------------------------------//");
-    Serial.println("//--------------------------- START ----------------------------//");
-  }
-}
+
 void set_http_header() {
   http.begin((String)"http://" + server_name + "/sensor.php");  //Specify destination for HTTP request
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
@@ -324,15 +319,15 @@ float set_timer_stop() {
 }
 
 void handle_OnConnect() {
-  float bme_humidity    = bme.readHumidity();
+  /*float bme_humidity    = bme.readHumidity();
   float bme_temperature = bme.readTemperature();
   float bme_pressure    = bme.readPressure() / 100.0F;
   float bme_altitude    = bme.readAltitude(SEALEVELPRESSURE_HPA);
   float light_analog    = analogRead(A0);
   float wifi_get_rssi   = WiFi.RSSI();
-  char* rellay          = "OFF";
-  String s = SendHTML(bme_temperature, bme_humidity);
-  server.send(200, "text/html", s); 
+  String rellay          = "OFF";*/
+  //String s = SendHTML(bme_temperature, bme_humidity);
+  //server.send(200, "text/html", s); 
 }
 
 void handle_NotFound(){
@@ -347,7 +342,7 @@ void callback_light(CoapPacket &packet, IPAddress ip, int port) {
   // send response
   char p[packet.payloadlen + 1];
   memcpy(p, packet.payload, packet.payloadlen);
-  p[packet.payloadlen] = NULL;
+  p[packet.payloadlen] = 0;
   
   String message(p);
 
@@ -357,10 +352,10 @@ void callback_light(CoapPacket &packet, IPAddress ip, int port) {
     LEDSTATE = true;
       
   if (LEDSTATE) {
-    digitalWrite(LEDP, HIGH) ; 
+    digitalWrite(DHTPIN, HIGH) ; 
     coap.sendResponse(ip, port, packet.messageid, "1");
   } else { 
-    digitalWrite(LEDP, LOW) ; 
+    digitalWrite(DHTPIN, LOW) ; 
     coap.sendResponse(ip, port, packet.messageid, "0");
   }
 }
@@ -370,32 +365,7 @@ void callback_response(CoapPacket &packet, IPAddress ip, int port) {
   
   char p[packet.payloadlen + 1];
   memcpy(p, packet.payload, packet.payloadlen);
-  p[packet.payloadlen] = NULL;
+  p[packet.payloadlen] = 0;
   
   Serial.println(p);
-}
-String SendHTML(float bme_temperature,float bme_humidity){
-  String ptr = "<!DOCTYPE html> <html>\n";
-  ptr +="<head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, user-scalable=no\">\n";
-  ptr +="<title>ESP8266 Weather Report</title>\n";
-  ptr +="<style>html { font-family: Helvetica; display: inline-block; margin: 0px auto; text-align: center;}\n";
-  ptr +="body{margin-top: 50px;} h1 {color: #444444;margin: 50px auto 30px;}\n";
-  ptr +="p {font-size: 24px;color: #444444;margin-bottom: 10px;}\n";
-  ptr +="</style>\n";
-  ptr +="</head>\n";
-  ptr +="<body>\n";
-  ptr +="<div id=\"webpage\">\n";
-  ptr +="<h1>ESP8266 NodeMCU Weather Report</h1>\n";
-  
-  ptr +="<p>Temperature: ";
-  ptr +=(String)bme_temperature;
-  ptr +="°C</p>";
-  ptr +="<p>Humidity: ";
-  ptr +=(String)bme_humidity;
-  ptr +="%</p>";
-  
-  ptr +="</div>\n";
-  ptr +="</body>\n";
-  ptr +="</html>\n";
-  return ptr;
 }
