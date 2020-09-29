@@ -1,0 +1,28 @@
+{
+  "name": "esp32ModbusTCP",
+  "version": "0.0.1",
+  "keywords": "Arduino, ESP32, Modbus, TCP, async",
+  "description": "async Modbus-TCP client for ESP32",
+  "homepage": "https://github.com/bertmelis/esp32ModbusTCP",
+  "license": "MIT",
+  "authors": {
+    "name": "Bert Melis",
+    "url": "https://github.com/bertmelis",
+    "maintainer": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bertmelis/esp32ModbusTCP.git",
+    "branch": "master"
+  },
+  "frameworks": "arduino",
+  "platforms": [
+    "espressif32"
+  ],
+  "dependencies": [
+    {
+      "name": "AsyncTCP",
+      "platforms": "espressif32"
+    }
+  ]
+}
