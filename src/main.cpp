@@ -9,11 +9,12 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
-//#include <WiFiUdp.h>
+#include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <ArduinoJson.h>
 #include <Adafruit_Sensor.h>
-//#include <ModbusMaster232.h>
+#include <ModbusTCPSlave.h>
+#include <coap-simple.h>
 
 #include "Adafruit_BME280.h"
 /*----------------------------Підключення до Wifi мережі---------------------------*/
@@ -22,11 +23,15 @@
   #define STASSID "OzzyHome_2G"
   #define STAPSK  "19951995"
 #endif
+#ifndef COAP
+  #define COAP 0
+  #define LEDP 9
+#endif
 #ifndef OTAUPDATE
   #define OTAUPDATE true
 #endif
 #ifndef MODBUS232
-  #define MODBUS232 true  // Define flag to enable ModeBus
+  #define MODBUS232 0  // Define flag to enable ModeBus
   #define address   1     // Define one address for reading
   #define bitQty    1     // Define the number of bits to read
 #endif
@@ -54,6 +59,11 @@ bool WiFiConnected = false;
 uint32_t    timer_start;
 uint32_t    timer_stop;
 
+//WIFI Settings
+byte modbus_ip[]      = { 192, 168, 1, 126};
+byte modbus_gateway[] = { 192, 168, 1, 1 };
+byte modbus_subnet[]  = { 255, 255, 255, 0 };
+
 /* DynamicJsonDocument initialization */
 DynamicJsonDocument jsonBufferGet(2048);
 /* BME280 initialization */
@@ -65,9 +75,25 @@ HTTPClient http;
 
 ESP8266WebServer server(server_port);
 
+ModbusTCPSlave ModbusSlave;
+unsigned long timer;
+unsigned long checkRSSIMillis;
 // Instantiate ModbusMaster object as slave ID 1
 //ModbusMaster232 ModbusNode(1);
+byte mac[] = { 0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
+IPAddress dev_ip(0,0,0,0);
 
+
+
+// CoAP client response callback
+void callback_response(CoapPacket &packet, IPAddress ip, int port);
+
+// CoAP server endpoint url callback
+void callback_light(CoapPacket &packet, IPAddress ip, int port);
+
+// UDP and CoAP class
+WiFiUDP Udp;
+Coap coap(Udp);
 //functions modbus
 // node.readHoldingRegisters(,)
 // node.writeSingleRegister(,)
@@ -79,6 +105,7 @@ void set_timer_start();
 float set_timer_stop();
 void handle_NotFound();
 String SendHTML(float bme_temperature,float bme_humidity);
+byte checkRSSI();
 /*---------------------------------------------------------------------------------*/
 /*--------------------------------------SETUP--------------------------------------*/
 /*---------------------------------------------------------------------------------*/
@@ -87,12 +114,37 @@ void setup()
   int count = 0;
   /* Init Serial port at 115200 bps*/
   Serial.begin(115200);     // Initialize Serial port at 115200 bps
-  /*if (MODBUS232 == true)
+  if (COAP == true)
   {
-    pinMode(7, OUTPUT);
+    Serial.println("Setup Callback Light");
+    coap.server(callback_light, "light");
+    // client response callback.
+    // this endpoint is single callback.
+    Serial.println("Setup Response Callback");
+    coap.response(callback_response);
+    // start coap server/client
+    coap.start();
+  }
+  if (MODBUS232 == true)
+  {
     //ModbusNode.begin(115200);  // Initialize Modbus communication baud rate
     Serial.println("Modbus RTU Master Online");
-  }*/
+      ModbusSlave.begin("Telecom-28778737", "passwordwificasa47893000",
+            modbus_ip, modbus_gateway, modbus_subnet);
+
+      delay(1000);
+      ModbusSlave.MBInputRegister[0] = 100;
+      ModbusSlave.MBInputRegister[1] = 65500;
+      ModbusSlave.MBInputRegister[2] = 300;
+      ModbusSlave.MBInputRegister[3] = 400;
+      ModbusSlave.MBInputRegister[4] = 500;
+
+      ModbusSlave.MBHoldingRegister[0] = 1;
+      ModbusSlave.MBHoldingRegister[1] = 2;
+      ModbusSlave.MBHoldingRegister[2] = 3;
+      ModbusSlave.MBHoldingRegister[3] = 4;
+      ModbusSlave.MBHoldingRegister[4] = 5;
+  }
   
   while (!Serial) continue; // wait for serial port to connect. Needed for native USB
   Serial.println("//--------------------------------------------------------------//");
@@ -184,32 +236,33 @@ void setup()
 /*---------------------------------------------------------------------------------*/
 void loop() 
 {
+  if (COAP == true) {
+    Serial.println("Send Request");
+    int msgid = coap.get(IPAddress(0, 0, 0, 0), 5683, "time");
+
+    delay(1000);
+    coap.loop();
+  }
+
   if (OTAUPDATE == true) {
     ArduinoOTA.handle();
   }
 
-  /*if (MODBUS232 == true)
+  if (MODBUS232 == true)
   {
-    pinMode(4, OUTPUT);
-    ModbusNode.begin(19200);  // Initialize Modbus communication baud rate
-     /// Write Digital Outputs - Holding Register[4]  /->  [5] ////////////
-    response = node.readHoldingRegisters(4, 1); 
-    /// get value - captura valor
-    int led = node.getResponseBuffer(0);
-    // GPIO 04 
-    digitalWrite(4,led);
-    // Clear the response buffer
-    ModbusNode.clearResponseBuffer();
-    delay(mSEC);
-    // Send Random Value  - Holding Register[5]    /->  [6]  ////////////
-    ModbusNode.writeSingleRegister(5, random(1, 999 )); 
-    delay(mSEC);
-    //Read Analog Input - Holding Register[6]     /->  [7] ////////////
-    ModbusNode.writeSingleRegister(6, analogRead(A0));
-    delay(mSEC);
-    // Clear the response buffer
-    ModbusNode.clearResponseBuffer();
-  }*/
+    ModbusSlave.Run();
+    delay(10);
+
+    if (millis() - timer >= 1000) {
+      timer = millis();
+      ModbusSlave.MBInputRegister[1]++;
+    }
+
+    if (millis() - checkRSSIMillis >= 10000) {
+      checkRSSIMillis = millis();
+      ModbusSlave.MBInputRegister[0] = checkRSSI();
+    }
+  }
   /* Config client with no delay to fast connection */
   client.setNoDelay(1);
 
@@ -313,6 +366,19 @@ float set_timer_stop() {
     return (time_delta);
   }
 }
+byte checkRSSI() {
+  byte quality;
+  long rssi = WiFi.RSSI();
+  if (rssi <= -100)
+    quality = 0;
+  else if (rssi >= -50)
+    quality = 100;
+  else
+    rssi = rssi + 100;
+  quality = byte(rssi * 2);
+
+  return quality;
+}
 
 /*
 void handle_OnConnect() {
@@ -355,4 +421,41 @@ String SendHTML(float bme_temperature,float bme_humidity){
   ptr +="</body>\n";
   ptr +="</html>\n";
   return ptr;
+}
+
+bool LEDSTATE;
+
+void callback_light(CoapPacket &packet, IPAddress ip, int port) {
+  Serial.println("[Light] ON/OFF");
+  
+  // send response
+  char p[packet.payloadlen + 1];
+  memcpy(p, packet.payload, packet.payloadlen);
+  p[packet.payloadlen] = NULL;
+  
+  String message(p);
+
+  if (message.equals("0"))
+    LEDSTATE = false;
+  else if(message.equals("1"))
+    LEDSTATE = true;
+      
+  if (LEDSTATE) {
+    digitalWrite(LEDP, HIGH) ; 
+    coap.sendResponse(ip, port, packet.messageid, "1");
+  } else { 
+    digitalWrite(LEDP, LOW) ; 
+    coap.sendResponse(ip, port, packet.messageid, "0");
+  }
+}
+
+// CoAP client response callback
+void callback_response(CoapPacket &packet, IPAddress ip, int port) {
+  Serial.println("[Coap Response got]");
+  
+  char p[packet.payloadlen + 1];
+  memcpy(p, packet.payload, packet.payloadlen);
+  p[packet.payloadlen] = NULL;
+  
+  Serial.println(p);
 }
