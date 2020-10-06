@@ -3,45 +3,54 @@
 /*---------------------------------------HASP---------------------------------------*/
 /*----------------------------------------------------------------------------------*/
 /************************************************************************************/
+/* Global variables and defines */
+#define I2C_MODE        FALCE // Define flag to enable I2C_MODE
+#define COAP_MODE       FALSE // Define flag to enable COAP_MODE
+#define MODBUS232_MODE  FALSE // Define flag to enable MODBUS232_MODE
+#define OTAUPDATE_MODE  FALSE // Define flag to enable OTAUPDATE_MODE
+
 // Include Libraries
 #include <Wire.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266mDNS.h>
+//#include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
-#include <WiFiUdp.h>
-#include <ArduinoOTA.h>
 #include <ArduinoJson.h>
-#include <Adafruit_Sensor.h>
-#include <ModbusTCPSlave.h>
-#include <coap-simple.h>
-#include "Adafruit_BME280.h"
 #include "handlers.h"
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
+
+#if (OTAUPDATE_MODE)
+  #include <ArduinoOTA.h>
+#endif
+#if (MODBUS232_MODE)
+  #include <ModbusTCPSlave.h>
+#endif
+#if (COAP_MODE)
+  #include <WiFiUdp.h>
+  #include <coap-simple.h>
+#endif
+
+
+
 /*----------------------------Підключення до Wifi мережі---------------------------*/
-/* Global variables and defines */
-#ifndef COAP
-  #define COAP 0
-  #define LEDP 9
-#endif
-#ifndef MODBUS232
-  #define MODBUS232 0     // Define flag to enable ModeBus
-  #define address   1     // Define one address for reading
-  #define bitQty    1     // Define the number of bits to read
-#endif
-#define OTAUPDATE true  
+/* Wi-Fi settings */
 #define STASSID "OzzyHome_2G"
 #define STAPSK  "19951995"
-#define DEVICE_DELAY   100000  // Setup delay
-#define DHTPIN  2       // DHT22 connect to pin 0
+/* Pin board settings */
+#define PIN_DHT 2       // DHT22 connect to pin 2
+#define PIN_LED 9       // LED connect to pin 9
 #define LED     D0      // Led in NodeMCU at pin GPIO16 (D0).
-#define SEC     1000    // One Sec define
-#define mSEC    100     // One mSec define
+/* Real Time Clock settings */
+#define RTC_DELAY   100000  // Setup delay
+#define RTC_SEC     1000    // One Sec define
+#define RTC_mSEC    100     // One mSec define
 #define SEALEVELPRESSURE_HPA (1013.25)
 /* Object initialization */
 IPAddress   ESP_ip_addr;
 IPAddress   ESP_subnet_addr;
 IPAddress   ESP_gateway_addr;
-IPAddress dev_ip(0,0,0,0);
+IPAddress   dev_ip(0,0,0,0);
 /* Object initialization */
 const char* ssid         = STASSID;
 const char* password     = STAPSK;
@@ -59,22 +68,30 @@ unsigned long timer;
 unsigned long checkRSSIMillis;
 bool WiFiConnected = false;
 //WIFI Settings
+byte mac[]            = { 0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
 byte modbus_ip[]      = { 192, 168, 1, 126};
 byte modbus_gateway[] = { 192, 168, 1, 1 };
 byte modbus_subnet[]  = { 255, 255, 255, 0 };
-byte mac[] = { 0x00, 0xAA, 0xBB, 0xCC, 0xDE, 0x02 };
 
 DynamicJsonDocument jsonBufferGet(2048);  /* DynamicJsonDocument initialization */
 Adafruit_BME280 bme;                      /* BME280 initialization */
 WiFiClient client;                        /* WiFiClient initialization */
 HTTPClient http;                          /* HTTPClient initialization */
 ESP8266WebServer server(server_port);     /* ESP8266WebServer initialization */
-ModbusTCPSlave ModbusSlave;               /* ModbusTCPSlave initialization */
-WiFiUDP Udp;                              /* WiFiUDP initialization */
-Coap coap(Udp);                           /* Coap initialization */
 
-void callback_response(CoapPacket &packet, IPAddress ip, int port);
-void callback_light(CoapPacket &packet, IPAddress ip, int port);
+#if (COAP_MODE) 
+  ModbusTCPSlave ModbusSlave;               /* ModbusTCPSlave initialization */
+#endif
+
+#if (OTAUPDATE_MODE)
+  WiFiUDP Udp;                              /* WiFiUDP initialization */
+#endif
+
+#if (COAP_MODE) 
+  void callback_response(CoapPacket &packet, IPAddress ip, int port);
+  void callback_light(CoapPacket &packet, IPAddress ip, int port);
+#endif
+
 void handle_NotFound();
 String SendHTML(float bme_temperature,float bme_humidity);
 byte checkRSSI();
@@ -86,7 +103,11 @@ void setup() {
   int count = 0;            /* Init Serial port at 115200 bps*/
   Serial.begin(115200);     // Initialize Serial port at 115200 bps
 
-  if (COAP == true) {
+  #if (I2C_MODE)
+    Wire.begin();        // join i2c bus (address optional for master)
+  #endif
+
+  #if (COAP_MODE)
     Udp.begin(localUdpPort);  // begin coap server/client
     Serial.println("[INFO] Setup Callback Light");
     coap.server(callback_light, "light");
@@ -94,9 +115,9 @@ void setup() {
     Serial.println("[INFO] Setup Response Callback");
     coap.response(callback_response);
     coap.start();             // start coap server/client
-  }
+  #endif
 
-  if (MODBUS232 == true) {
+  #if (MODBUS232_MODE)
     Serial.println("[INFO] Modbus RTU Master Online");
       ModbusSlave.begin("Telecom-28778737", "passwordwificasa47893000",
             modbus_ip, modbus_gateway, modbus_subnet);
@@ -111,7 +132,7 @@ void setup() {
       ModbusSlave.MBHoldingRegister[2] = 3;
       ModbusSlave.MBHoldingRegister[3] = 4;
       ModbusSlave.MBHoldingRegister[4] = 5;
-  }
+  #endif
   
   while (!Serial) continue; // wait for serial port to connect. Needed for native USB
   print_cli_start_message();
@@ -137,33 +158,36 @@ void setup() {
   WiFi.begin(ssid, password);
   Serial.print("[INFO] Please be patient. Connecting : ");
   while (WiFi.status() != WL_CONNECTED) {
-    delay(SEC);
+    delay(RTC_SEC);
     Serial.print("*");
     if ((count%10)==true) Serial.print("\n[INFO] Please be patient. Connecting : ");
     count++;
   }
-  /*ArduinoOTA.setPort(8266);
-  ArduinoOTA.setHostname("NODE ESP8266");
-  ArduinoOTA.onStart([]() {
-    if (ArduinoOTA.getCommand() == U_FLASH) type_of_OTA = "sketch";
-    else type_of_OTA = "filesystem";
-    Serial.println((String)"[START] ESP8266 OTA updating :" + type_of_OTA);
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("[ END ] ESP8266 OTA");
-  });
-  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
-    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
-  });
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("[ERROR] OTA : [%u] : ", error);
-    if (error == OTA_AUTH_ERROR)          Serial.println("Auth Failed");
-    else if (error == OTA_BEGIN_ERROR)    Serial.println("Begin Failed");
-    else if (error == OTA_CONNECT_ERROR)  Serial.println("Connect Failed");
-    else if (error == OTA_RECEIVE_ERROR)  Serial.println("Receive Failed");
-    else if (error == OTA_END_ERROR)      Serial.println("End Failed");
-  });
-  ArduinoOTA.begin();*/
+
+  #if (OTAUPDATE_MODE)
+    ArduinoOTA.setPort(8266);
+    ArduinoOTA.setHostname("NODE ESP8266");
+    ArduinoOTA.onStart([]() {
+      if (ArduinoOTA.getCommand() == U_FLASH) type_of_OTA = "sketch";
+      else type_of_OTA = "filesystem";
+      Serial.println((String)"[START] ESP8266 OTA updating :" + type_of_OTA);
+    });
+    ArduinoOTA.onEnd([]() {
+      Serial.println("[ END ] ESP8266 OTA");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+      Serial.printf("[ERROR] OTA : [%u] : ", error);
+      if (error == OTA_AUTH_ERROR)          Serial.println("Auth Failed");
+      else if (error == OTA_BEGIN_ERROR)    Serial.println("Begin Failed");
+      else if (error == OTA_CONNECT_ERROR)  Serial.println("Connect Failed");
+      else if (error == OTA_RECEIVE_ERROR)  Serial.println("Receive Failed");
+      else if (error == OTA_END_ERROR)      Serial.println("End Failed");
+    });
+    ArduinoOTA.begin();
+  #endif
   /* print your gateway localIP */
   ESP_ip_addr = WiFi.localIP();
   ESP_gateway_addr = WiFi.gatewayIP();
@@ -197,20 +221,28 @@ void setup() {
 /*---------------------------------------------------------------------------------*/
 void loop() 
 {
-  if (COAP == true) {
+  #if (COAP_MODE)
     Serial.print("[INFO] Send Request: ");
     int msgid = coap.get(IPAddress(0, 0, 0, 0), 5683, "time");
     Serial.println(msgid);
     delay(1000);
     coap.loop();
-  }
+  #endif
 
-  if (OTAUPDATE == true) {
+  #if (I2C_MODE)
+    Wire.requestFrom(8, 6);    // request 6 bytes from slave device #8
+    while (Wire.available()) { // slave may send less than requested
+      char message_from_I2C = Wire.read(); // receive a byte as character
+      Serial.println((String)"[INFO] " + message_from_I2C);         // print the character
+    }
+    delay(500);
+  #endif
+
+  #if (OTAUPDATE_MODE)
     ArduinoOTA.handle();
-  }
+  #endif
 
-  if (MODBUS232 == true)
-  {
+  #if (MODBUS232_MODE)
     ModbusSlave.Run();
     delay(10);
 
@@ -223,7 +255,7 @@ void loop()
       checkRSSIMillis = millis();
       ModbusSlave.MBInputRegister[0] = checkRSSI();
     }
-  }
+  #endif
   /* Config client with no delay to fast connection */
   client.setNoDelay(1);
 
@@ -235,7 +267,7 @@ void loop()
   float bme_altitude    = bme.readAltitude(SEALEVELPRESSURE_HPA);
   float light_analog    = analogRead(A0);
   float wifi_get_rssi   = WiFi.RSSI();
-  char* rellay          = "ON";
+  char *rellay          = "ON";
   /* HTTPClient Send request GET */
   set_timer_start();
   http.useHTTP10(true);
@@ -265,7 +297,7 @@ void loop()
                     "&rssi="       + String(wifi_get_rssi);
   /* HTTPClient Send request POST */
   set_timer_start();
-  http.begin((String)"http://" + server_name + "/sensor.php");  //Specify destination for HTTP request
+  http.begin((String)"http://" + (String)server_name + "/sensor.php");  //Specify destination for HTTP request
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   http.addHeader("Connection","keep-alive");
   http.addHeader("Host", (String)server_name);
@@ -303,7 +335,7 @@ void loop()
   Serial.println("┌──[DONE] Light sleep enabled!");
   Serial.println("└────────> Please whate for wake up!");
   set_timer_start();
-  delay(DEVICE_DELAY); // Delay for 1.66min.
+  delay(RTC_DELAY); // Delay for 1.66min.
   Serial.println((String)"[DONE] Wake Up ... Delay time took :" + set_timer_stop());
 }
 /*------------------------------------------------------------*/
@@ -353,39 +385,43 @@ String SendHTML(float bme_temperature,float bme_humidity){
   return ptr;
 }
 
-bool LEDSTATE;
 
-void callback_light(CoapPacket &packet, IPAddress ip, int port) {
-  Serial.println("[Light] ON/OFF");
-  
-  // send response
-  char p[packet.payloadlen + 1];
-  memcpy(p, packet.payload, packet.payloadlen);
-  p[packet.payloadlen] = NULL;
-  
-  String message(p);
 
-  if (message.equals("0"))
-    LEDSTATE = false;
-  else if(message.equals("1"))
-    LEDSTATE = true;
-      
-  if (LEDSTATE) {
-    digitalWrite(LEDP, HIGH) ; 
-    coap.sendResponse(ip, port, packet.messageid, "1");
-  } else { 
-    digitalWrite(LEDP, LOW) ; 
-    coap.sendResponse(ip, port, packet.messageid, "0");
+#if (COAP_MODE)
+  bool LEDSTATE;
+
+  void callback_light(CoapPacket &packet, IPAddress ip, int port) {
+    Serial.println("[Light] ON/OFF");
+    
+    // send response
+    char p[packet.payloadlen + 1];
+    memcpy(p, packet.payload, packet.payloadlen);
+    p[packet.payloadlen] = 0;
+    
+    String message(p);
+
+    if (message.equals("0"))
+      LEDSTATE = false;
+    else if(message.equals("1"))
+      LEDSTATE = true;
+        
+    if (LEDSTATE) {
+      digitalWrite(PIN_LED, HIGH) ; 
+      coap.sendResponse(ip, port, packet.messageid, "1");
+    } else { 
+      digitalWrite(PIN_LED, LOW) ; 
+      coap.sendResponse(ip, port, packet.messageid, "0");
+    }
   }
-}
 
-// CoAP client response callback
-void callback_response(CoapPacket &packet, IPAddress ip, int port) {
-  Serial.println("[Coap Response got]");
-  
-  char p[packet.payloadlen + 1];
-  memcpy(p, packet.payload, packet.payloadlen);
-  p[packet.payloadlen] = NULL;
-  
-  Serial.println(p);
-}
+  // CoAP client response callback
+  void callback_response(CoapPacket &packet, IPAddress ip, int port) {
+    Serial.println("[Coap Response got]");
+    
+    char p[packet.payloadlen + 1];
+    memcpy(p, packet.payload, packet.payloadlen);
+    p[packet.payloadlen] = 0;
+    
+    Serial.println(p);
+  }
+#endif
