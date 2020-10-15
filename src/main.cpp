@@ -160,6 +160,7 @@ void setup() {
     Serial.print("CANSTAT: ");Serial.println(CAN0.mcp2515_readRegister(MCP_CANSTAT),BIN);  
   #endif
   
+  
   while (!Serial) continue; // wait for serial port to connect. Needed for native USB
   print_cli_start_message();
   
