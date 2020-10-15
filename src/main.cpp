@@ -26,6 +26,10 @@
 #if (MODBUS232_MODE)
   #include <ModbusTCPSlave.h>
 #endif
+#if (CANBUS_MODE)
+  #include <mcp_can.h>
+  #include <SPI.h>
+#endif
 #if (COAP_MODE)
   #include <WiFiUdp.h>
   #include <coap-simple.h>
@@ -87,6 +91,15 @@ ESP8266WebServer server(server_port);     /* ESP8266WebServer initialization */
   WiFiUDP Udp;                              /* WiFiUDP initialization */
 #endif
 
+  #if (CANBUS_MODE)
+  long unsigned int rxId;
+  unsigned char len = 0;
+  unsigned char rxBuf[8];
+  
+  MCP_CAN CAN0(4);                               // Set CS to pin 4 (D2 on my NodeMCU)
+  unsigned char stmp[8] = {0, 1, 2, 3, 4, 5, 6, 7
+#endif
+
 #if (COAP_MODE) 
   void callback_response(CoapPacket &packet, IPAddress ip, int port);
   void callback_light(CoapPacket &packet, IPAddress ip, int port);
@@ -132,6 +145,19 @@ void setup() {
       ModbusSlave.MBHoldingRegister[2] = 3;
       ModbusSlave.MBHoldingRegister[3] = 4;
       ModbusSlave.MBHoldingRegister[4] = 5;
+  #endif
+  /*
+  *   CNF1 = 0x40
+  *   CNF2 = 0xF1
+  *   CNF3 = 0x85
+  */
+  #if (CANBUS_MODE)
+    CAN0.begin(CAN_250KBPS);                       // init can bus : baudrate = 250k 
+    pinMode(2, INPUT);                            // Setting pin 2 for /INT input (D4 on NodeMCU)
+    Serial.println("MCP2515 Library Receive Example...");
+    Serial.print("CANSTAT: ");Serial.println(CAN0.mcp2515_readRegister(MCP_CANSTAT),BIN);
+    CAN0.mcp2515_modifyRegister(MCP_CANCTRL,MODE_MASK,MODE_LOOPBACK); // MODE_NORMAL MODE_LOOPBACK
+    Serial.print("CANSTAT: ");Serial.println(CAN0.mcp2515_readRegister(MCP_CANSTAT),BIN);  
   #endif
   
   while (!Serial) continue; // wait for serial port to connect. Needed for native USB
@@ -256,6 +282,42 @@ void loop()
       ModbusSlave.MBInputRegister[0] = checkRSSI();
     }
   #endif
+
+  #if (CANBUS_MODE)
+    if(!digitalRead(2))                         // If pin 2 is low, read receive buffer
+    {
+      CAN0.readMsgBuf(&len, rxBuf);              // Read data: len = data length, buf = data byte(s)
+      rxId = CAN0.getCanId();                    // Get message ID
+      Serial.print("ID: ");
+      Serial.print(rxId, HEX);
+      Serial.print("  Data: ");
+      for(int i = 0; i<len; i++)                // Print each byte of the data
+      {
+        if(rxBuf[i] < 0x10)                     // If data byte is less than 0x10, add a leading zero
+        {
+          Serial.print("0");
+        }
+        Serial.print(rxBuf[i], HEX);
+        Serial.print(" ");
+      }
+      Serial.println();
+    }
+    // send data:  id = 0x00, standrad flame, data len = 8, stmp: data buf
+    if(Serial.available()){
+    stmp[0] = Serial.read();
+    if(stmp[0] == 'l'){
+    CAN0.mcp2515_modifyRegister(MCP_CANCTRL,MODE_MASK,MODE_LOOPBACK); // MODE_NORMAL MODE_LOOPBACK
+    }
+    if(stmp[0] == 'n'){
+    CAN0.mcp2515_modifyRegister(MCP_CANCTRL,MODE_MASK,MODE_NORMAL); // MODE_NORMAL MODE_LOOPBACK
+    }
+
+    }
+    CAN0.sendMsgBuf(0x00, 0, 8, stmp);
+    //Serial.print("CANSTAT: ");Serial.println(CAN0.mcp2515_readRegister(MCP_CANSTAT),BIN);  
+    delay(100);                       // send data per 100ms
+  #endif
+
   /* Config client with no delay to fast connection */
   client.setNoDelay(1);
 
