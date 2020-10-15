@@ -11,6 +11,11 @@ ESP8266 Arduino core comes with libraries to communicate over WiFi using TCP and
 
 **IoT gateway include next protocols:**
 - Modbus RTU protocol;
+- CAN Bus (test mode);
+- TCP/IP;
+- I2C;
+- UART;
+- SNMP (TCP/UDP devises - test mode)
 
 ## Installation of Additional Libraries
 The firmware was written under the Arduino IDE. You will need the following additional libraries:
